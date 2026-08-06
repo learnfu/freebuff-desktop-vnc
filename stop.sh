@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
+set -e
+
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR"
 
-echo "🛑 Stopping Freebuff Desktop GUI & VNC servers..."
+echo "============================================================"
+echo "🛑 STOPPING FREEBUFF DESKTOP GUI & VNC SERVER..."
+echo "============================================================"
 
-pkill -f "runner.py" 2>/dev/null || true
-pkill -f "squashfs-root/@codebufffreebuff-desktop" 2>/dev/null || true
-pkill -f "Freebuff-Desktop.AppImage" 2>/dev/null || true
-pkill -f "x11vnc.*5921" 2>/dev/null || true
-pkill -f "websockify.*6080" 2>/dev/null || true
-pkill -f "Xvfb :21" 2>/dev/null || true
-pkill -f "fluxbox" 2>/dev/null || true
-rm -f "/tmp/.X21-lock" 2>/dev/null || true
+pkill -f 'Xvnc :21' || true
+pkill -f 'Xvfb :21' || true
+pkill -f 'x11vnc' || true
+pkill -f 'websockify' || true
+pkill -f '@codebufffreebuff-desktop' || true
+pkill -f 'runner.py' || true
+rm -f /tmp/.X21-lock || true
 
-echo "✅ All Freebuff Desktop GUI & VNC processes stopped!"
+echo "✅ All VNC and Freebuff Desktop GUI processes stopped!"

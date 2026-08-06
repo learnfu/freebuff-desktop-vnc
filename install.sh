@@ -17,9 +17,9 @@ if ! swapon --show | grep -q '/swapfile'; then
     sudo swapon /swapfile 2>/dev/null || true
 fi
 
-# 2. Install Linux GUI, VNC, and Electron dependencies
-echo "📥 Installing apt packages (xvfb, x11vnc, fluxbox, websockify, novnc)..."
-sudo apt-get update -qq && sudo apt-get install -y -qq xvfb x11vnc fluxbox websockify novnc libfuse2 libgtk-3-0 libnss3 libasound2 libgbm1 libxss1 >/dev/null 2>&1 || true
+# 2. Install Linux GUI, TigerVNC Server, and Electron dependencies
+echo "📥 Installing apt packages (tigervnc-standalone-server, xvfb, x11vnc, fluxbox, websockify, novnc)..."
+sudo apt-get update -qq && sudo apt-get install -y -qq tigervnc-standalone-server xvfb x11vnc fluxbox openbox websockify novnc libfuse2 libgtk-3-0 libnss3 libasound2 libgbm1 libxss1 >/dev/null 2>&1 || true
 
 # 3. Download Freebuff Desktop AppImage if missing
 APPIMAGE="$DIR/Freebuff-Desktop.AppImage"
@@ -39,4 +39,5 @@ echo ""
 echo "============================================================"
 echo "✅ INSTALLATION COMPLETE!"
 echo "   Run ./start.sh to launch Freebuff Desktop GUI on VNC port 5921!"
+echo "   Custom Ports Example: ./start.sh 5922 6082"
 echo "============================================================"
