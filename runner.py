@@ -48,11 +48,11 @@ subprocess.run(f"rm -f /tmp/.X{display_num}-lock /tmp/.X11-unix/X{display_num}",
 
 time.sleep(1)
 
-# Configure Fluxbox auto-maximize
+# Configure Fluxbox auto-maximize & auto-focus for all windows
 fluxbox_dir = os.path.expanduser("~/.fluxbox")
 os.makedirs(fluxbox_dir, exist_ok=True)
 with open(os.path.join(fluxbox_dir, "apps"), "w") as f:
-    f.write("""[app] (@codebufffreebuff-desktop)
+    f.write("""[app] (name=.*) (class=.*)
   [Maximized] {yes}
   [Focus] {yes}
 [end]
@@ -65,7 +65,7 @@ with open(os.path.join(openbox_dir, "rc.xml"), "w") as f:
     f.write("""<?xml version="1.0" encoding="UTF-8"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
   <applications>
-    <application name="@codebufffreebuff-desktop">
+    <application class="*">
       <maximized>yes</maximized>
       <focus>yes</focus>
     </application>
@@ -77,7 +77,7 @@ with open(os.path.join(openbox_dir, "rc.xml"), "w") as f:
 xvnc_bin = shutil.which("Xvnc") or ("/usr/bin/Xvnc" if os.path.exists("/usr/bin/Xvnc") else None)
 
 if not xvnc_bin:
-    subprocess.run("sudo apt-get update -qq && sudo apt-get install -y -qq tigervnc-standalone-server xvfb x11vnc fluxbox openbox wmctrl xdotool >/dev/null 2>&1 || true", shell=True)
+    subprocess.run("sudo apt-get update -qq && sudo apt-get install -y -qq tigervnc-standalone-server xvfb x11vnc fluxbox openbox wmctrl xdotool x11-xserver-utils >/dev/null 2>&1 || true", shell=True)
     xvnc_bin = shutil.which("Xvnc") or ("/usr/bin/Xvnc" if os.path.exists("/usr/bin/Xvnc") else None)
 
 if xvnc_bin and os.path.exists(xvnc_bin):
@@ -116,6 +116,9 @@ else:
         x11vnc = subprocess.Popen(vnc_cmd, stdout=out, stderr=out)
     time.sleep(2)
 
+# Set desktop background color so VNC is never pitch black
+subprocess.run(f"xsetroot -solid '#1e1e2e' 2>/dev/null || true", shell=True, env={**os.environ, "DISPLAY": display_str})
+
 # 2. Start window manager
 wm_path = shutil.which("fluxbox") or shutil.which("openbox")
 if wm_path:
@@ -128,7 +131,7 @@ if web_bin and os.path.exists(web_bin):
     novnc = subprocess.Popen([web_bin, "--web=/usr/share/novnc/", str(web_port), f"localhost:{vnc_port}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(1)
 
-# 4. Start Freebuff Desktop App with 2D native X11 rendering
+# 4. Start Freebuff Desktop App with explicit 1440x900 window sizing
 bin_dir = os.path.join(dir_path, "bin")
 custom_path = f"{bin_dir}:{os.environ.get('PATH', '')}"
 
@@ -147,22 +150,28 @@ with open(os.path.join(dir_path, "freebuff-app.log"), "w") as out:
         "--disable-gpu-compositing",
         "--disable-accelerated-2d-canvas",
         "--disable-software-rasterizer",
-        "--disable-dev-shm-usage"
+        "--disable-dev-shm-usage",
+        "--window-size=1440,900",
+        "--start-maximized"
     ]
     app = subprocess.Popen(cmd, env=env, stdout=out, stderr=out)
 
-# 5. Background Auto-Raiser / Auto-Maximizer to guarantee NO black screen
-def auto_raise_window():
-    time.sleep(3)
+# 5. Continuous Window Resizer / Auto-Maximizer loop
+def force_window_maximize():
     env = {**os.environ, "DISPLAY": display_str}
-    for _ in range(10):
+    for _ in range(12):
+        time.sleep(2)
         try:
+            # Resize and maximize any window on the display
+            subprocess.run("wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz 2>/dev/null || true", shell=True, env=env)
+            subprocess.run("wmctrl -r 'Freebuff Desktop' -e 0,0,0,1440,900 2>/dev/null || true", shell=True, env=env)
+            subprocess.run("wmctrl -r 'Freebuff Desktop' -b add,maximized_vert,maximized_horz 2>/dev/null || true", shell=True, env=env)
+            subprocess.run("wmctrl -r '@codebufffreebuff-desktop' -e 0,0,0,1440,900 2>/dev/null || true", shell=True, env=env)
             subprocess.run("wmctrl -r '@codebufffreebuff-desktop' -b add,maximized_vert,maximized_horz 2>/dev/null || true", shell=True, env=env)
             subprocess.run("xdotool search --onlyvisible --class '@codebufffreebuff-desktop' windowactivate 2>/dev/null || true", shell=True, env=env)
         except Exception: pass
-        time.sleep(2)
 
-t = threading.Thread(target=auto_raise_window, daemon=True)
+t = threading.Thread(target=force_window_maximize, daemon=True)
 t.start()
 
 print(f"Freebuff Desktop GUI running on VNC port {vnc_port} (Display {display_str}) & Web port {web_port}!")
