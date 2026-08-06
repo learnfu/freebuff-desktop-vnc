@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Custom xdg-open wrapper to catch and display Freebuff OAuth Login URLs instantly
+URL="$1"
+DIR="/teamspace/studios/this_studio/myworks/buffdesktop"
+
+if [ -n "$URL" ]; then
+    echo "$URL" > "$DIR/login_url.txt"
+    echo "" >> "$DIR/auth_links.log"
+    echo "[$(date)] AUTH URL: $URL" >> "$DIR/auth_links.log"
+    
+    echo "============================================================"
+    echo "🔗 CAPTURED FREEBUFF SIGN-IN URL:"
+    echo "$URL"
+    echo "============================================================"
+fi
+
+# Pass through to system browser if available
+if [ -x /usr/bin/xdg-open.real ]; then
+    /usr/bin/xdg-open.real "$@"
+elif [ -x /usr/bin/sensible-browser ]; then
+    /usr/bin/sensible-browser "$@"
+else
+    python3 -m webbrowser "$@" 2>/dev/null || true
+fi
