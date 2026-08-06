@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, subprocess, time, shutil, sys, argparse
+import os, subprocess, time, shutil, sys, argparse, threading
 
 dir_path = os.path.dirname(os.path.abspath(__file__))
 os.chdir(dir_path)
@@ -21,34 +21,56 @@ if pid > 0:
 
 os.setsid()
 
-# Clean up old processes
-subprocess.run(f"pkill -f 'Xvnc :21' || true", shell=True)
-subprocess.run(f"pkill -f 'Xvfb :21' || true", shell=True)
+# Ensure AppImage is extracted if missing on a new environment
+squash_dir = os.path.join(dir_path, "squashfs-root")
+appimage = os.path.join(dir_path, "Freebuff-Desktop.AppImage")
+
+if not os.path.exists(squash_dir):
+    if not os.path.exists(appimage):
+        subprocess.run(f"curl -fsSL -L 'https://freebuff.com/api/desktop/download/linux' -o '{appimage}'", shell=True)
+        subprocess.run(f"chmod +x '{appimage}'", shell=True)
+    subprocess.run(f"'{appimage}' --appimage-extract >/dev/null 2>&1", shell=True)
+
+# Clean up old display locks and processes
+subprocess.run("pkill -f 'Xvnc :21' || true", shell=True)
+subprocess.run("pkill -f 'Xvfb :21' || true", shell=True)
 subprocess.run(f"pkill -f 'x11vnc.*{vnc_port}' || true", shell=True)
 subprocess.run(f"pkill -f 'websockify.*{web_port}' || true", shell=True)
-subprocess.run(f"pkill -f '@codebufffreebuff-desktop' || true", shell=True)
-subprocess.run("rm -f /tmp/.X21-lock", shell=True)
+subprocess.run("pkill -f '@codebufffreebuff-desktop' || true", shell=True)
+subprocess.run("rm -f /tmp/.X21-lock /tmp/.X11-unix/X21", shell=True)
 
 time.sleep(1)
 
-# Ensure fluxbox configuration auto-maximizes Freebuff Desktop app
+# Configure Fluxbox auto-maximize
 fluxbox_dir = os.path.expanduser("~/.fluxbox")
 os.makedirs(fluxbox_dir, exist_ok=True)
-apps_file = os.path.join(fluxbox_dir, "apps")
-with open(apps_file, "w") as f:
+with open(os.path.join(fluxbox_dir, "apps"), "w") as f:
     f.write("""[app] (@codebufffreebuff-desktop)
   [Maximized] {yes}
+  [Focus] {yes}
 [end]
 """)
 
-# 1. Locate or install Xvnc (TigerVNC Server)
-xvnc_bin = shutil.which("Xvnc")
-if not xvnc_bin and os.path.exists("/usr/bin/Xvnc"):
-    xvnc_bin = "/usr/bin/Xvnc"
+# Configure Openbox auto-maximize
+openbox_dir = os.path.expanduser("~/.config/openbox")
+os.makedirs(openbox_dir, exist_ok=True)
+with open(os.path.join(openbox_dir, "rc.xml"), "w") as f:
+    f.write("""<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <applications>
+    <application name="@codebufffreebuff-desktop">
+      <maximized>yes</maximized>
+      <focus>yes</focus>
+    </application>
+  </applications>
+</openbox_config>
+""")
+
+# 1. Locate or auto-install Xvnc / Xvfb
+xvnc_bin = shutil.which("Xvnc") or ("/usr/bin/Xvnc" if os.path.exists("/usr/bin/Xvnc") else None)
 
 if not xvnc_bin:
-    # Auto-attempt apt installation of tigervnc-standalone-server if missing
-    subprocess.run("sudo apt-get update -qq && sudo apt-get install -y -qq tigervnc-standalone-server >/dev/null 2>&1 || true", shell=True)
+    subprocess.run("sudo apt-get update -qq && sudo apt-get install -y -qq tigervnc-standalone-server xvfb x11vnc fluxbox openbox wmctrl xdotool >/dev/null 2>&1 || true", shell=True)
     xvnc_bin = shutil.which("Xvnc") or ("/usr/bin/Xvnc" if os.path.exists("/usr/bin/Xvnc") else None)
 
 if xvnc_bin and os.path.exists(xvnc_bin):
@@ -64,7 +86,6 @@ if xvnc_bin and os.path.exists(xvnc_bin):
         xvnc = subprocess.Popen(xvnc_cmd, stdout=out, stderr=out)
     time.sleep(2)
 else:
-    # Fallback seamlessly to Xvfb + x11vnc if Xvnc is unavailable
     xvfb_bin = shutil.which("Xvfb") or "/usr/bin/Xvfb"
     subprocess.Popen([xvfb_bin, ":21", "-screen", "0", "1440x900x16"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2)
@@ -88,7 +109,7 @@ else:
         x11vnc = subprocess.Popen(vnc_cmd, stdout=out, stderr=out)
     time.sleep(2)
 
-# 2. Start window manager (fluxbox or openbox if available)
+# 2. Start window manager
 wm_path = shutil.which("fluxbox") or shutil.which("openbox")
 if wm_path:
     wm = subprocess.Popen([wm_path], env={**os.environ, "DISPLAY": ":21"}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -109,10 +130,10 @@ with open(os.path.join(dir_path, "freebuff-app.log"), "w") as out:
         **os.environ,
         "PATH": custom_path,
         "DISPLAY": ":21",
-        "APPDIR": os.path.join(dir_path, "squashfs-root")
+        "APPDIR": squash_dir
     }
     cmd = [
-        os.path.join(dir_path, "squashfs-root/@codebufffreebuff-desktop"),
+        os.path.join(squash_dir, "@codebufffreebuff-desktop"),
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-gpu",
@@ -122,5 +143,20 @@ with open(os.path.join(dir_path, "freebuff-app.log"), "w") as out:
         "--disable-dev-shm-usage"
     ]
     app = subprocess.Popen(cmd, env=env, stdout=out, stderr=out)
+
+# 5. Background Auto-Raiser / Auto-Maximizer to guarantee NO black screen
+def auto_raise_window():
+    time.sleep(3)
+    env = {**os.environ, "DISPLAY": ":21"}
+    for _ in range(10):
+        try:
+            # Force focus, raise, and maximize via wmctrl / xdotool
+            subprocess.run("wmctrl -r '@codebufffreebuff-desktop' -b add,maximized_vert,maximized_horz 2>/dev/null || true", shell=True, env=env)
+            subprocess.run("xdotool search --onlyvisible --class '@codebufffreebuff-desktop' windowactivate 2>/dev/null || true", shell=True, env=env)
+        except Exception: pass
+        time.sleep(2)
+
+t = threading.Thread(target=auto_raise_window, daemon=True)
+t.start()
 
 print(f"Freebuff Desktop GUI running on VNC port {vnc_port} & Web port {web_port}!")
