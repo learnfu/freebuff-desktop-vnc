@@ -13,6 +13,13 @@ args = parser.parse_args()
 vnc_port = args.vnc
 web_port = args.web
 
+# Calculate dynamic X11 display number from vnc_port (e.g. 5921 -> :21, 5922 -> :22)
+display_num = vnc_port - 5900
+if display_num < 1 or display_num > 99:
+    display_num = 21
+
+display_str = f":{display_num}"
+
 # Detach completely from parent subshell/task
 pid = os.fork()
 if pid > 0:
@@ -32,12 +39,12 @@ if not os.path.exists(squash_dir):
     subprocess.run(f"'{appimage}' --appimage-extract >/dev/null 2>&1", shell=True)
 
 # Clean up old display locks and processes
-subprocess.run("pkill -f 'Xvnc :21' || true", shell=True)
-subprocess.run("pkill -f 'Xvfb :21' || true", shell=True)
+subprocess.run(f"pkill -f 'Xvnc {display_str}' || true", shell=True)
+subprocess.run(f"pkill -f 'Xvfb {display_str}' || true", shell=True)
 subprocess.run(f"pkill -f 'x11vnc.*{vnc_port}' || true", shell=True)
 subprocess.run(f"pkill -f 'websockify.*{web_port}' || true", shell=True)
 subprocess.run("pkill -f '@codebufffreebuff-desktop' || true", shell=True)
-subprocess.run("rm -f /tmp/.X21-lock /tmp/.X11-unix/X21", shell=True)
+subprocess.run(f"rm -f /tmp/.X{display_num}-lock /tmp/.X11-unix/X{display_num}", shell=True)
 
 time.sleep(1)
 
@@ -76,7 +83,7 @@ if not xvnc_bin:
 if xvnc_bin and os.path.exists(xvnc_bin):
     xvnc_cmd = [
         xvnc_bin,
-        ":21",
+        display_str,
         "-geometry", "1440x900",
         "-depth", "16",
         "-rfbport", str(vnc_port),
@@ -87,13 +94,13 @@ if xvnc_bin and os.path.exists(xvnc_bin):
     time.sleep(2)
 else:
     xvfb_bin = shutil.which("Xvfb") or "/usr/bin/Xvfb"
-    subprocess.Popen([xvfb_bin, ":21", "-screen", "0", "1440x900x16"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen([xvfb_bin, display_str, "-screen", "0", "1440x900x16"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2)
     
     vnc_bin = shutil.which("x11vnc") or "/usr/bin/x11vnc"
     vnc_cmd = [
         vnc_bin,
-        "-display", ":21",
+        "-display", display_str,
         "-rfbport", str(vnc_port),
         "-forever",
         "-shared",
@@ -112,7 +119,7 @@ else:
 # 2. Start window manager
 wm_path = shutil.which("fluxbox") or shutil.which("openbox")
 if wm_path:
-    wm = subprocess.Popen([wm_path], env={**os.environ, "DISPLAY": ":21"}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    wm = subprocess.Popen([wm_path], env={**os.environ, "DISPLAY": display_str}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(1)
 
 # 3. Start websockify / noVNC on specified web port
@@ -129,7 +136,7 @@ with open(os.path.join(dir_path, "freebuff-app.log"), "w") as out:
     env = {
         **os.environ,
         "PATH": custom_path,
-        "DISPLAY": ":21",
+        "DISPLAY": display_str,
         "APPDIR": squash_dir
     }
     cmd = [
@@ -147,10 +154,9 @@ with open(os.path.join(dir_path, "freebuff-app.log"), "w") as out:
 # 5. Background Auto-Raiser / Auto-Maximizer to guarantee NO black screen
 def auto_raise_window():
     time.sleep(3)
-    env = {**os.environ, "DISPLAY": ":21"}
+    env = {**os.environ, "DISPLAY": display_str}
     for _ in range(10):
         try:
-            # Force focus, raise, and maximize via wmctrl / xdotool
             subprocess.run("wmctrl -r '@codebufffreebuff-desktop' -b add,maximized_vert,maximized_horz 2>/dev/null || true", shell=True, env=env)
             subprocess.run("xdotool search --onlyvisible --class '@codebufffreebuff-desktop' windowactivate 2>/dev/null || true", shell=True, env=env)
         except Exception: pass
@@ -159,4 +165,4 @@ def auto_raise_window():
 t = threading.Thread(target=auto_raise_window, daemon=True)
 t.start()
 
-print(f"Freebuff Desktop GUI running on VNC port {vnc_port} & Web port {web_port}!")
+print(f"Freebuff Desktop GUI running on VNC port {vnc_port} (Display {display_str}) & Web port {web_port}!")

@@ -31,12 +31,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+DISPLAY_NUM=$((VNC_PORT - 5900))
+if [ "$DISPLAY_NUM" -lt 1 ] || [ "$DISPLAY_NUM" -gt 99 ]; then
+  DISPLAY_NUM=21
+fi
+
 python3 "$DIR/runner.py" --vnc "$VNC_PORT" --web "$WEB_PORT"
 
 echo "============================================================"
 echo "🎉 FREEBUFF DESKTOP GUI IS LIVE & RUNNING SMOOTH!"
 echo "============================================================"
-echo "📌 VNC Viewer Port:  localhost:$VNC_PORT (Display :21)"
+echo "📌 VNC Viewer Port:  localhost:$VNC_PORT (Display :$DISPLAY_NUM)"
 echo "📌 Web Browser Port: http://localhost:$WEB_PORT (Port Viewer Plugin)"
 echo "   App Logs:         $DIR/freebuff-app.log"
 echo "   VNC Logs:         $DIR/xvnc.log"
