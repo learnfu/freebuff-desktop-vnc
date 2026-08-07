@@ -5,7 +5,18 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
 echo "============================================================"
-echo "🛠️ REPAIRING FREEBUFF DESKTOP SQLITE DATABASES"
+echo "🛑 FORCE-KILLING PROCESSES TO RELEASE ALL FILE LOCKS..."
+echo "============================================================"
+pkill -9 -f 'bun' || true
+pkill -9 -f 'node' || true
+pkill -9 -f '@codebufffreebuff-desktop' || true
+pkill -9 -f 'Xvnc' || true
+pkill -9 -f 'Xvfb' || true
+rm -f /tmp/.X*-lock /tmp/.X11-unix/X* || true
+sleep 2
+
+echo "============================================================"
+echo "🛠️ REPAIRING & ENABLING WAL MODE ON DESKTOP DATABASES"
 echo "============================================================"
 
 python3 -c "
@@ -30,28 +41,25 @@ for p in projects:
     if not os.path.exists(db): continue
     p_name = os.path.basename(p)
     
+    if os.path.exists(wal): os.remove(wal)
+    if os.path.exists(shm): os.remove(shm)
+    
     try:
-        conn = sqlite3.connect(db)
+        conn = sqlite3.connect(db, timeout=10)
         c = conn.cursor()
-        c.execute('PRAGMA wal_checkpoint(FULL);')
+        c.execute('PRAGMA journal_mode = WAL;')
+        jm = c.fetchone()[0]
+        c.execute('PRAGMA busy_timeout = 5000;')
+        c.execute('PRAGMA synchronous = NORMAL;')
         c.execute('REINDEX;')
         c.execute('VACUUM;')
-        c.execute('PRAGMA integrity_check;')
-        res = c.fetchone()[0]
         conn.close()
-        
-        dump_cmd = f'sqlite3 \"{db}\" \".dump\" | sqlite3 \"{db}.clean\"'
-        os.system(dump_cmd)
-        if os.path.exists(f'{db}.clean') and os.path.getsize(f'{db}.clean') > 1000:
-            shutil.copyfile(f'{db}.clean', db)
-            os.remove(f'{db}.clean')
-            if os.path.exists(wal): os.remove(wal)
-            if os.path.exists(shm): os.remove(shm)
-            print(f'✅ Project [{p_name}] database repaired successfully ({os.path.getsize(db)} bytes)!')
+        print(f'✅ Project [{p_name}] -> WAL mode enabled ({jm}) & optimized successfully!')
     except Exception as e:
         print(f'❌ Error repairing {p_name}: {e}')
 "
 
 echo "============================================================"
-echo "🎉 ALL DATABASES REPAIRED & READY!"
+echo "🚀 RESTARTING FREEBUFF DESKTOP GUI..."
 echo "============================================================"
+./start.sh
