@@ -220,6 +220,16 @@ def add_new_account(token, email, name=None):
     print(f"🎉 Successfully added new account: {new_acc['name']} ({new_acc['email']})!")
     return new_acc
 
+def launch_cli_slot_login(slot, label=None):
+    slot_label = label or f"freebuff-cli-slot-{slot}"
+    sh_path = FREEBUFF_ALLACC_DIR / "freebuff-cli-instances.sh"
+    if sh_path.exists():
+        print(f"🔑 Launching Official Freebuff CLI Login for Slot {slot} [{slot_label}]...")
+        subprocess.run(f"bash '{sh_path}' login {slot} '{slot_label}'", shell=True, cwd=FREEBUFF_ALLACC_DIR)
+    else:
+        print(f"🔑 Launching Freebuff Login for Slot {slot}...")
+        subprocess.run(f"npx freebuff login", shell=True)
+
 def print_unified_menu(accounts, dt_token, cli_token):
     print("=" * 80)
     print(" ⚡ UNIFIED FREEBUFF ACCOUNT SWITCHER (CLI & DESKTOP) ⚡")
@@ -242,8 +252,8 @@ def print_unified_menu(accounts, dt_token, cli_token):
     print("-" * 80)
     print("Commands:")
     print("  • Enter account number (e.g. '1') to choose target app to activate")
-    print("  • 'add <token> <email> [name]' to register a brand new account token")
-    print("  • 'login <slot>' to activate an account slot")
+    print("  • './switch login <slot>' to launch interactive CLI login for a slot")
+    print("  • './switch add <token> <email> [name]' to register a brand new account token")
     print("  • 'q' to exit\n")
 
 def main():
@@ -257,18 +267,20 @@ def main():
 
         # Handle 'add' or 'login' commands
         if first in ["add", "login"]:
-            if len(args) >= 3 and len(args[1]) > 10:  # token + email
+            if len(args) >= 3 and len(args[1]) > 10:  # token + email registration
                 token = args[1]
                 email = args[2]
                 name = args[3] if len(args) >= 4 else None
                 add_new_account(token, email, name)
                 return
-            elif len(args) >= 2 and args[1].isdigit():  # e.g., ./switch login 1
-                idx = int(args[1]) - 1
-                if 0 <= idx < len(accounts):
-                    set_desktop_account(accounts[idx])
-                    set_cli_account(accounts[idx])
-                    return
+            elif len(args) >= 2 and args[1].isdigit():  # e.g., ./switch login 1 -> CLI slot login
+                slot = int(args[1])
+                label = args[2] if len(args) >= 3 else None
+                launch_cli_slot_login(slot, label)
+                return
+            elif len(args) == 1:
+                launch_cli_slot_login(1)
+                return
 
         # Handle numeric target or account name
         selected = None
@@ -306,6 +318,10 @@ def main():
             return
 
         parts = choice.split()
+        if parts[0].lower() in ["add", "login"] and len(parts) >= 2 and parts[1].isdigit():
+            launch_cli_slot_login(int(parts[1]))
+            return
+
         if parts[0].lower() in ["add", "login"] and len(parts) >= 3:
             add_new_account(parts[1], parts[2], parts[3] if len(parts) >= 4 else None)
             return
