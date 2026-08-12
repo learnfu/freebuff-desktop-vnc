@@ -1,1 +1,342 @@
-/teamspace/studios/this_studio/myworks/unified_switcher.py
+#!/usr/bin/env python3
+"""
+⚡ UNIFIED FREEBUFF ACCOUNT SWITCHER (CLI & DESKTOP) ⚡
+Dynamically auto-discovers accounts from Desktop, CLI instances, parent configs, and credentials.
+Allows switching Desktop, CLI, or Both with single commands.
+"""
+
+import os
+import sys
+import json
+import subprocess
+import argparse
+from pathlib import Path
+
+# Paths
+SHARED_ACCOUNTS_FILE = os.path.expanduser("~/.config/freebuff-shared-accounts.json")
+DESKTOP_STATE_PATH = os.path.expanduser("~/.config/freebuff-desktop/state.json")
+CLI_CRED_PATH = os.path.expanduser("~/.config/manicode/credentials.json")
+
+FREEBUFF_ALLACC_DIR = Path(os.path.expanduser("~/myworks/freebuffallacc"))
+PARENT_CONFIG_PATH = FREEBUFF_ALLACC_DIR / ".freebuff-parent-1-config.json"
+INSTANCES_DIR = FREEBUFF_ALLACC_DIR / "freebuff-cli-instances"
+
+BUFFDESKTOP_DIR = Path(os.path.expanduser("~/myworks/buffdesktop"))
+
+# Known fallback accounts pool to ensure full recovery
+FALLBACK_ACCOUNTS = [
+    {
+        "name": "gwgdev+hey",
+        "email": "gwgdev+hey@proton.me",
+        "token": "55dd5d3b-c66c-4b50-8f54-a9cace677b50",
+        "id": "08141fc2-810b-4960-bd11-d566010e01ab",
+        "display_name": "ksopls"
+    },
+    {
+        "name": "jkiloals",
+        "email": "gwgdev@proton.me",
+        "token": "b270349f-1358-4a89-9898-c9149389908e",
+        "id": "e7f66312-3f69-41a8-bb40-42c5f9747921",
+        "display_name": "jkiloals"
+    },
+    {
+        "name": "koalsw",
+        "email": "holapws@proton.me",
+        "token": "6d3f5afa-cfa1-4eaf-8ea7-ed8b9478db96",
+        "id": "626ddad4-0012-42ae-99d0-f6f8d1bb365c",
+        "display_name": "koalsw"
+    },
+    {
+        "name": "kisolaps",
+        "email": "holapws+hey@proton.me",
+        "token": "c7f61f4d-7f14-4361-82f3-f458b4867b79",
+        "id": "b0836c8c-d294-4972-aff7-87914f22ab86",
+        "display_name": "kisolaps"
+    },
+    {
+        "name": "lpalsa",
+        "email": "lookatcock+hoo@proton.me",
+        "token": "51facf0a-7402-4431-b0f2-08823c3a48e0",
+        "id": "246ff27d-8041-4431-b505-8cd15583e5f6",
+        "display_name": "lpalsa"
+    },
+    {
+        "name": "hirautagao",
+        "email": "hirautagao@gmail.com",
+        "token": "df9fae88-ae23-4581-80fc-efd0b6caebff",
+        "id": "usr_slot_4",
+        "display_name": "hirautagao"
+    },
+    {
+        "name": "loopcss",
+        "email": "loopcpp+wo@proton.me",
+        "token": "7789cd96-c2a5-4a7f-9913-6575f99cdde0",
+        "id": "97a877c5-fd9f-4838-a597-575229c39d82",
+        "display_name": "loopcss"
+    },
+    {
+        "name": "jiksol",
+        "email": "lookatcock@proton.me",
+        "token": "fb8e91ad-09de-4a95-a637-e9bc984b5ba6",
+        "id": "91163d31-c53d-4063-baf2-a3407664d462",
+        "display_name": "jiksol"
+    }
+]
+
+def load_json(filepath):
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def save_json(filepath, data):
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "w") as f:
+        json.dump(data, f, indent=2)
+
+def discover_all_accounts():
+    accounts_by_key = {}
+
+    def add_acc(token, email, name=None, user_id=None, source=""):
+        if not token or not isinstance(token, str) or len(token) < 10:
+            return
+        key = email.lower() if email else token
+        existing = accounts_by_key.get(key, {})
+        accounts_by_key[key] = {
+            "name": name or existing.get("name") or (email.split("@")[0] if email else "Account"),
+            "email": email or existing.get("email") or "unknown@email.com",
+            "token": token,
+            "id": user_id or existing.get("id") or f"usr_{hash(token) % 1000000}",
+            "display_name": name or existing.get("display_name") or (email.split("@")[0] if email else "Account")
+        }
+
+    # 1. Fallback base pool
+    for acc in FALLBACK_ACCOUNTS:
+        add_acc(acc["token"], acc["email"], acc["name"], acc["id"], "fallback")
+
+    # 2. Shared accounts store
+    shared = load_json(SHARED_ACCOUNTS_FILE)
+    if isinstance(shared, list):
+        for acc in shared:
+            add_acc(acc.get("token"), acc.get("email"), acc.get("name"), acc.get("id"), "shared")
+
+    # 3. Desktop state.json
+    desktop_state = load_json(DESKTOP_STATE_PATH)
+    if desktop_state and "authSessions" in desktop_state:
+        for host, auth in desktop_state["authSessions"].items():
+            if isinstance(auth, dict) and auth.get("token"):
+                user = auth.get("user", {})
+                add_acc(auth.get("token"), user.get("email"), user.get("name"), user.get("id"), "desktop")
+
+    # 4. CLI credentials.json
+    cli_cred = load_json(CLI_CRED_PATH)
+    if cli_cred:
+        for k, v in cli_cred.items():
+            if isinstance(v, dict) and v.get("authToken"):
+                add_acc(v.get("authToken"), v.get("email"), v.get("name"), v.get("id"), "cli_cred")
+
+    # 5. Parent Config
+    parent_cfg = load_json(PARENT_CONFIG_PATH)
+    if parent_cfg and "ACCOUNTS" in parent_cfg:
+        for acc in parent_cfg["ACCOUNTS"]:
+            if isinstance(acc, dict) and acc.get("token"):
+                add_acc(acc.get("token"), acc.get("email"), acc.get("name"), acc.get("id"), "parent_cfg")
+
+    # 6. Instance Slots
+    if INSTANCES_DIR.exists():
+        for slot_dir in INSTANCES_DIR.glob("instance*"):
+            cred = load_json(slot_dir / "home/.config/manicode/credentials.json")
+            if cred:
+                for k, v in cred.items():
+                    if isinstance(v, dict) and v.get("authToken"):
+                        add_acc(v.get("authToken"), v.get("email"), v.get("name"), v.get("id"), "instance")
+
+    acc_list = list(accounts_by_key.values())
+    save_json(SHARED_ACCOUNTS_FILE, acc_list)
+    return acc_list
+
+def get_active_desktop_token():
+    state = load_json(DESKTOP_STATE_PATH)
+    if state and "authSessions" in state:
+        auth = state["authSessions"].get("https://www.codebuff.com", {})
+        return auth.get("token")
+    return None
+
+def get_active_cli_token():
+    cred = load_json(CLI_CRED_PATH)
+    if cred:
+        for v in cred.values():
+            if isinstance(v, dict) and v.get("authToken"):
+                return v.get("authToken")
+    return None
+
+def set_desktop_account(acc):
+    state = load_json(DESKTOP_STATE_PATH) or {}
+    if "authSessions" not in state:
+        state["authSessions"] = {}
+    state["authSessions"]["https://www.codebuff.com"] = {
+        "token": acc["token"],
+        "user": {
+            "id": acc["id"],
+            "email": acc["email"],
+            "name": acc["display_name"]
+        }
+    }
+    save_json(DESKTOP_STATE_PATH, state)
+    print(f"✅ Desktop updated to: {acc['name']} ({acc['email']})")
+
+    # Restart Desktop app if running
+    res = subprocess.run("pgrep -f '@codebufffreebuff-desktop' || pgrep -f 'runner.py'", shell=True, capture_output=True)
+    if res.returncode == 0:
+        print("🔄 Restarting Freebuff Desktop app...")
+        stop_sh = BUFFDESKTOP_DIR / "stop.sh"
+        start_sh = BUFFDESKTOP_DIR / "start.sh"
+        if stop_sh.exists():
+            subprocess.run(f"bash '{stop_sh}'", shell=True)
+        if start_sh.exists():
+            subprocess.run(f"bash '{start_sh}' >/dev/null 2>&1 &", shell=True)
+            print("🚀 Desktop app restarted with new session!")
+
+def set_cli_account(acc):
+    cli_cred = {
+        "default": {
+            "id": acc["id"],
+            "name": acc["display_name"],
+            "email": acc["email"],
+            "authToken": acc["token"],
+            "fingerprintId": "enhanced-yVcxCoXlor63JLczcFjF2FWfppwHAl03jKjalt00oJ0",
+            "fingerprintHash": "040ad64de309467a7d7ca1bd2d78e1ddc7b2f6571d14a1a917b69a82d4554c44"
+        }
+    }
+    save_json(CLI_CRED_PATH, cli_cred)
+    print(f"✅ CLI updated to: {acc['name']} ({acc['email']})")
+
+def add_new_account(token, email, name=None):
+    accs = discover_all_accounts()
+    new_acc = {
+        "name": name or (email.split("@")[0] if email else "NewAccount"),
+        "email": email or "user@freebuff.com",
+        "token": token.strip(),
+        "id": f"usr_{hash(token) % 1000000}",
+        "display_name": name or (email.split("@")[0] if email else "NewAccount")
+    }
+    accs.append(new_acc)
+    save_json(SHARED_ACCOUNTS_FILE, accs)
+    print(f"🎉 Successfully added new account: {new_acc['name']} ({new_acc['email']})!")
+    return new_acc
+
+def print_unified_menu(accounts, dt_token, cli_token):
+    print("=" * 80)
+    print(" ⚡ UNIFIED FREEBUFF ACCOUNT SWITCHER (CLI & DESKTOP) ⚡")
+    print("=" * 80)
+    print(f" {'#':<3} | {'Account Name':<16} | {'Email':<30} | Active Status")
+    print("-" * 80)
+
+    for i, acc in enumerate(accounts, 1):
+        status_flags = []
+        if acc["token"] == dt_token:
+            status_flags.append("🖥️  DESKTOP ACTIVE")
+        if acc["token"] == cli_token:
+            status_flags.append("💻 CLI ACTIVE")
+        
+        status_str = " & ".join(status_flags) if status_flags else ""
+        pointer = "👉 " if status_flags else "   "
+        
+        print(f"{pointer}{i:<2} | {acc['name']:<16} | {acc['email']:<30} | {status_str}")
+
+    print("-" * 80)
+    print("Commands:")
+    print("  • Enter account number (e.g. '1') to choose target app to activate")
+    print("  • 'add <token> <email> [name]' to register a brand new account token")
+    print("  • 'q' to exit\n")
+
+def main():
+    parser = argparse.ArgumentParser(description="Unified Freebuff Account Switcher")
+    parser.add_argument("target", nargs="?", help="Account number (1-N) or account name")
+    parser.add_argument("app", nargs="?", choices=["desktop", "cli", "both", "d", "c", "b"], help="Target app: desktop (d), cli (c), or both (b)")
+    args = parser.parse_args()
+
+    accounts = discover_all_accounts()
+    dt_token = get_active_desktop_token()
+    cli_token = get_active_cli_token()
+
+    if args.target:
+        target = args.target.strip()
+        
+        if target.lower() == "add" and len(sys.argv) >= 4:
+            token = sys.argv[2]
+            email = sys.argv[3]
+            name = sys.argv[4] if len(sys.argv) >= 5 else None
+            add_new_account(token, email, name)
+            return
+
+        selected = None
+        if target.isdigit():
+            idx = int(target) - 1
+            if 0 <= idx < len(accounts):
+                selected = accounts[idx]
+        else:
+            for acc in accounts:
+                if acc["name"].lower() == target.lower() or acc["email"].lower() == target.lower():
+                    selected = acc
+                    break
+
+        if not selected:
+            print(f"❌ Error: Account '{target}' not found.")
+            sys.exit(1)
+
+        app_choice = args.app.lower() if args.app else "both"
+        if app_choice in ["desktop", "d"]:
+            set_desktop_account(selected)
+        elif app_choice in ["cli", "c"]:
+            set_cli_account(selected)
+        else:
+            set_desktop_account(selected)
+            set_cli_account(selected)
+        return
+
+    # Interactive menu
+    print_unified_menu(accounts, dt_token, cli_token)
+    try:
+        choice = input("Select account number (1-N) or command: ").strip()
+        if not choice or choice.lower() == 'q':
+            print("Exiting.")
+            return
+
+        parts = choice.split()
+        if parts[0].lower() == "add" and len(parts) >= 3:
+            add_new_account(parts[1], parts[2], parts[3] if len(parts) >= 4 else None)
+            return
+
+        selected = None
+        if parts[0].isdigit():
+            idx = int(parts[0]) - 1
+            if 0 <= idx < len(accounts):
+                selected = accounts[idx]
+
+        if not selected:
+            print("Invalid account choice.")
+            return
+
+        print("\nSelect target application:")
+        print("  [1] Desktop GUI only")
+        print("  [2] CLI / Terminal only")
+        print("  [3] BOTH Desktop & CLI (Recommended)")
+        app_sel = input("Choice (1-3, default 3): ").strip()
+
+        if app_sel == "1":
+            set_desktop_account(selected)
+        elif app_sel == "2":
+            set_cli_account(selected)
+        else:
+            set_desktop_account(selected)
+            set_cli_account(selected)
+
+    except (KeyboardInterrupt, EOFError):
+        print("\nExiting.")
+
+if __name__ == "__main__":
+    main()
