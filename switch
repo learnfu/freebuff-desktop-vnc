@@ -181,6 +181,16 @@ def set_desktop_account(acc):
     save_json(DESKTOP_STATE_PATH, state)
     print(f"✅ Desktop updated to: {acc['name']} ({acc['email']})")
 
+    # Clean up stale orchestrator locks to prevent OrchestratorAlreadyRunningError
+    lock_base = os.path.expanduser("~/.config/freebuff-desktop/state.json.orchestrator-lock.sqlite")
+    for ext in ["", "-wal", "-shm"]:
+        p = lock_base + ext
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
     res = subprocess.run("pgrep -f '@codebufffreebuff-desktop' || pgrep -f 'runner.py'", shell=True, capture_output=True)
     if res.returncode == 0:
         print("🔄 Restarting Freebuff Desktop app...")
