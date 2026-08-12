@@ -9,7 +9,6 @@ import os
 import sys
 import json
 import subprocess
-import argparse
 from pathlib import Path
 
 # Paths
@@ -113,17 +112,14 @@ def discover_all_accounts():
             "display_name": name or existing.get("display_name") or (email.split("@")[0] if email else "Account")
         }
 
-    # 1. Fallback base pool
     for acc in FALLBACK_ACCOUNTS:
         add_acc(acc["token"], acc["email"], acc["name"], acc["id"], "fallback")
 
-    # 2. Shared accounts store
     shared = load_json(SHARED_ACCOUNTS_FILE)
     if isinstance(shared, list):
         for acc in shared:
             add_acc(acc.get("token"), acc.get("email"), acc.get("name"), acc.get("id"), "shared")
 
-    # 3. Desktop state.json
     desktop_state = load_json(DESKTOP_STATE_PATH)
     if desktop_state and "authSessions" in desktop_state:
         for host, auth in desktop_state["authSessions"].items():
@@ -131,21 +127,18 @@ def discover_all_accounts():
                 user = auth.get("user", {})
                 add_acc(auth.get("token"), user.get("email"), user.get("name"), user.get("id"), "desktop")
 
-    # 4. CLI credentials.json
     cli_cred = load_json(CLI_CRED_PATH)
     if cli_cred:
         for k, v in cli_cred.items():
             if isinstance(v, dict) and v.get("authToken"):
                 add_acc(v.get("authToken"), v.get("email"), v.get("name"), v.get("id"), "cli_cred")
 
-    # 5. Parent Config
     parent_cfg = load_json(PARENT_CONFIG_PATH)
     if parent_cfg and "ACCOUNTS" in parent_cfg:
         for acc in parent_cfg["ACCOUNTS"]:
             if isinstance(acc, dict) and acc.get("token"):
                 add_acc(acc.get("token"), acc.get("email"), acc.get("name"), acc.get("id"), "parent_cfg")
 
-    # 6. Instance Slots
     if INSTANCES_DIR.exists():
         for slot_dir in INSTANCES_DIR.glob("instance*"):
             cred = load_json(slot_dir / "home/.config/manicode/credentials.json")
@@ -188,7 +181,6 @@ def set_desktop_account(acc):
     save_json(DESKTOP_STATE_PATH, state)
     print(f"✅ Desktop updated to: {acc['name']} ({acc['email']})")
 
-    # Restart Desktop app if running
     res = subprocess.run("pgrep -f '@codebufffreebuff-desktop' || pgrep -f 'runner.py'", shell=True, capture_output=True)
     if res.returncode == 0:
         print("🔄 Restarting Freebuff Desktop app...")
@@ -251,52 +243,59 @@ def print_unified_menu(accounts, dt_token, cli_token):
     print("Commands:")
     print("  • Enter account number (e.g. '1') to choose target app to activate")
     print("  • 'add <token> <email> [name]' to register a brand new account token")
+    print("  • 'login <slot>' to activate an account slot")
     print("  • 'q' to exit\n")
 
 def main():
-    parser = argparse.ArgumentParser(description="Unified Freebuff Account Switcher")
-    parser.add_argument("target", nargs="?", help="Account number (1-N) or account name")
-    parser.add_argument("app", nargs="?", choices=["desktop", "cli", "both", "d", "c", "b"], help="Target app: desktop (d), cli (c), or both (b)")
-    args = parser.parse_args()
-
     accounts = discover_all_accounts()
     dt_token = get_active_desktop_token()
     cli_token = get_active_cli_token()
 
-    if args.target:
-        target = args.target.strip()
-        
-        if target.lower() == "add" and len(sys.argv) >= 4:
-            token = sys.argv[2]
-            email = sys.argv[3]
-            name = sys.argv[4] if len(sys.argv) >= 5 else None
-            add_new_account(token, email, name)
-            return
+    args = sys.argv[1:]
+    if args:
+        first = args[0].lower()
 
+        # Handle 'add' or 'login' commands
+        if first in ["add", "login"]:
+            if len(args) >= 3 and len(args[1]) > 10:  # token + email
+                token = args[1]
+                email = args[2]
+                name = args[3] if len(args) >= 4 else None
+                add_new_account(token, email, name)
+                return
+            elif len(args) >= 2 and args[1].isdigit():  # e.g., ./switch login 1
+                idx = int(args[1]) - 1
+                if 0 <= idx < len(accounts):
+                    set_desktop_account(accounts[idx])
+                    set_cli_account(accounts[idx])
+                    return
+
+        # Handle numeric target or account name
         selected = None
-        if target.isdigit():
-            idx = int(target) - 1
+        app_choice = "both"
+
+        if first.isdigit():
+            idx = int(first) - 1
             if 0 <= idx < len(accounts):
                 selected = accounts[idx]
         else:
             for acc in accounts:
-                if acc["name"].lower() == target.lower() or acc["email"].lower() == target.lower():
+                if acc["name"].lower() == first or acc["email"].lower() == first:
                     selected = acc
                     break
 
-        if not selected:
-            print(f"❌ Error: Account '{target}' not found.")
-            sys.exit(1)
+        if len(args) >= 2:
+            app_choice = args[1].lower()
 
-        app_choice = args.app.lower() if args.app else "both"
-        if app_choice in ["desktop", "d"]:
-            set_desktop_account(selected)
-        elif app_choice in ["cli", "c"]:
-            set_cli_account(selected)
-        else:
-            set_desktop_account(selected)
-            set_cli_account(selected)
-        return
+        if selected:
+            if app_choice in ["desktop", "d"]:
+                set_desktop_account(selected)
+            elif app_choice in ["cli", "c"]:
+                set_cli_account(selected)
+            else:
+                set_desktop_account(selected)
+                set_cli_account(selected)
+            return
 
     # Interactive menu
     print_unified_menu(accounts, dt_token, cli_token)
@@ -307,7 +306,7 @@ def main():
             return
 
         parts = choice.split()
-        if parts[0].lower() == "add" and len(parts) >= 3:
+        if parts[0].lower() in ["add", "login"] and len(parts) >= 3:
             add_new_account(parts[1], parts[2], parts[3] if len(parts) >= 4 else None)
             return
 
@@ -322,14 +321,14 @@ def main():
             return
 
         print("\nSelect target application:")
-        print("  [1] Desktop GUI only")
-        print("  [2] CLI / Terminal only")
-        print("  [3] BOTH Desktop & CLI (Recommended)")
-        app_sel = input("Choice (1-3, default 3): ").strip()
+        print("  [1] BOTH Desktop & CLI (Recommended)")
+        print("  [2] Desktop GUI only")
+        print("  [3] CLI / Terminal only")
+        app_sel = input("Choice (1-3, default 1): ").strip()
 
-        if app_sel == "1":
+        if app_sel == "2":
             set_desktop_account(selected)
-        elif app_sel == "2":
+        elif app_sel == "3":
             set_cli_account(selected)
         else:
             set_desktop_account(selected)
