@@ -3,12 +3,14 @@
 ⚡ UNIFIED FREEBUFF ACCOUNT SWITCHER (CLI & DESKTOP) ⚡
 Dynamically auto-discovers accounts from Desktop, CLI instances, parent configs, and credentials.
 Allows switching Desktop, CLI, or Both with single commands.
+Assigns unique device fingerprints per account.
 """
 
 import os
 import sys
 import json
 import subprocess
+import hashlib
 from pathlib import Path
 
 # Paths
@@ -22,7 +24,6 @@ INSTANCES_DIR = FREEBUFF_ALLACC_DIR / "freebuff-cli-instances"
 
 BUFFDESKTOP_DIR = Path(os.path.expanduser("~/myworks/buffdesktop"))
 
-# Known fallback accounts pool to ensure full recovery
 FALLBACK_ACCOUNTS = [
     {
         "name": "gwgdev+hey",
@@ -81,6 +82,13 @@ FALLBACK_ACCOUNTS = [
         "display_name": "jiksol"
     }
 ]
+
+def get_account_fingerprint(email, token):
+    """Generates a unique, deterministic device fingerprint per account."""
+    seed = f"freebuff_unique_account_{email}_{token}"
+    fp_hash = hashlib.sha256(seed.encode()).hexdigest()
+    fp_id = "enhanced-" + hashlib.sha256((seed + "_id").encode()).hexdigest()[:43]
+    return fp_id, fp_hash
 
 def load_json(filepath):
     if not os.path.exists(filepath):
@@ -181,7 +189,7 @@ def set_desktop_account(acc):
     save_json(DESKTOP_STATE_PATH, state)
     print(f"✅ Desktop updated to: {acc['name']} ({acc['email']})")
 
-    # Clean up stale orchestrator locks to prevent OrchestratorAlreadyRunningError
+    # Clean up stale orchestrator locks
     lock_base = os.path.expanduser("~/.config/freebuff-desktop/state.json.orchestrator-lock.sqlite")
     for ext in ["", "-wal", "-shm"]:
         p = lock_base + ext
@@ -203,18 +211,20 @@ def set_desktop_account(acc):
             print("🚀 Desktop app restarted with new session!")
 
 def set_cli_account(acc):
+    fp_id, fp_hash = get_account_fingerprint(acc["email"], acc["token"])
     cli_cred = {
         "default": {
             "id": acc["id"],
             "name": acc["display_name"],
             "email": acc["email"],
             "authToken": acc["token"],
-            "fingerprintId": "enhanced-yVcxCoXlor63JLczcFjF2FWfppwHAl03jKjalt00oJ0",
-            "fingerprintHash": "040ad64de309467a7d7ca1bd2d78e1ddc7b2f6571d14a1a917b69a82d4554c44"
+            "fingerprintId": fp_id,
+            "fingerprintHash": fp_hash
         }
     }
     save_json(CLI_CRED_PATH, cli_cred)
     print(f"✅ CLI updated to: {acc['name']} ({acc['email']})")
+    print(f"🔑 Assigned Unique Device Fingerprint: {fp_id[:20]}...")
 
 def add_new_account(token, email, name=None):
     accs = discover_all_accounts()
@@ -275,15 +285,14 @@ def main():
     if args:
         first = args[0].lower()
 
-        # Handle 'add' or 'login' commands
         if first in ["add", "login"]:
-            if len(args) >= 3 and len(args[1]) > 10:  # token + email registration
+            if len(args) >= 3 and len(args[1]) > 10:
                 token = args[1]
                 email = args[2]
                 name = args[3] if len(args) >= 4 else None
                 add_new_account(token, email, name)
                 return
-            elif len(args) >= 2 and args[1].isdigit():  # e.g., ./switch login 1 -> CLI slot login
+            elif len(args) >= 2 and args[1].isdigit():
                 slot = int(args[1])
                 label = args[2] if len(args) >= 3 else None
                 launch_cli_slot_login(slot, label)
@@ -292,7 +301,6 @@ def main():
                 launch_cli_slot_login(1)
                 return
 
-        # Handle numeric target or account name
         selected = None
         app_choice = "both"
 
@@ -319,7 +327,6 @@ def main():
                 set_cli_account(selected)
             return
 
-    # Interactive menu
     print_unified_menu(accounts, dt_token, cli_token)
     try:
         choice = input("Select account number (1-N) or command: ").strip()
