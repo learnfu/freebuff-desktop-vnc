@@ -21,6 +21,7 @@ CLI_CRED_PATH = os.path.expanduser("~/.config/manicode/credentials.json")
 FREEBUFF_ALLACC_DIR = Path(os.path.expanduser("~/myworks/freebuffallacc"))
 PARENT_CONFIG_PATH = FREEBUFF_ALLACC_DIR / ".freebuff-parent-1-config.json"
 INSTANCES_DIR = FREEBUFF_ALLACC_DIR / "freebuff-cli-instances"
+HOME_INSTANCES_DIR = Path(os.path.expanduser("~/.freebuff-cli-instances"))
 
 BUFFDESKTOP_DIR = Path(os.path.expanduser("~/myworks/buffdesktop"))
 
@@ -147,13 +148,15 @@ def discover_all_accounts():
             if isinstance(acc, dict) and acc.get("token"):
                 add_acc(acc.get("token"), acc.get("email"), acc.get("name"), acc.get("id"), "parent_cfg")
 
-    if INSTANCES_DIR.exists():
-        for slot_dir in INSTANCES_DIR.glob("instance*"):
-            cred = load_json(slot_dir / "home/.config/manicode/credentials.json")
-            if cred:
-                for k, v in cred.items():
-                    if isinstance(v, dict) and v.get("authToken"):
-                        add_acc(v.get("authToken"), v.get("email"), v.get("name"), v.get("id"), "instance")
+    # Scan both home .freebuff-cli-instances and local freebuff-cli-instances
+    for target_dir in [HOME_INSTANCES_DIR, INSTANCES_DIR]:
+        if target_dir.exists():
+            for slot_dir in target_dir.glob("instance*"):
+                cred = load_json(slot_dir / "home/.config/manicode/credentials.json")
+                if cred:
+                    for k, v in cred.items():
+                        if isinstance(v, dict) and v.get("authToken"):
+                            add_acc(v.get("authToken"), v.get("email"), v.get("name"), v.get("id"), "instance")
 
     acc_list = list(accounts_by_key.values())
     save_json(SHARED_ACCOUNTS_FILE, acc_list)
@@ -249,6 +252,18 @@ def launch_cli_slot_login(slot, label=None):
     else:
         print(f"🔑 Launching Freebuff Login for Slot {slot}...")
         subprocess.run(f"npx freebuff login", shell=True)
+
+    # Post-login: Check if slot credentials were updated and register into shared accounts
+    for target_dir in [HOME_INSTANCES_DIR, INSTANCES_DIR]:
+        cred_path = target_dir / f"instance{slot}" / "home/.config/manicode/credentials.json"
+        cred = load_json(cred_path)
+        if cred:
+            for v in cred.values():
+                if isinstance(v, dict) and v.get("authToken") and v.get("email"):
+                    new_acc = add_new_account(v["authToken"], v["email"], v.get("name"))
+                    set_cli_account(new_acc)
+                    print(f"🎉 Auto-registered & activated Slot {slot}: {new_acc['name']} ({new_acc['email']})!")
+                    return
 
 def print_unified_menu(accounts, dt_token, cli_token):
     print("=" * 80)
