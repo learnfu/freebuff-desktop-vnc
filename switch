@@ -3,15 +3,18 @@
 ⚡ UNIFIED FREEBUFF ACCOUNT SWITCHER (CLI & DESKTOP) ⚡
 Dynamically auto-discovers accounts from Desktop, CLI instances, parent configs, and credentials.
 Allows switching Desktop, CLI, or Both with single commands.
-Supports interactive ./switch rm / ./switch delete to list and delete slots.
+Supports ./switch test / check to verify if accounts are working, rate limited, or banned.
 """
 
 import os
 import sys
 import json
 import shutil
+import urllib.request
+import urllib.error
 import subprocess
 import hashlib
+import concurrent.futures
 from pathlib import Path
 
 # Paths
@@ -84,6 +87,34 @@ FALLBACK_ACCOUNTS = [
         "display_name": "jiksol"
     }
 ]
+
+def check_token_status(token):
+    if not token or len(token) < 10:
+        return "⚪ UNSET"
+    
+    url = "https://www.codebuff.com/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0"
+    }
+    body = json.dumps({"model": "deepseek-v4-flash", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}).encode()
+    req = urllib.request.Request(url, data=body, headers=headers)
+    
+    try:
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            return "🟢 WORKING"
+    except urllib.error.HTTPError as e:
+        if e.code in [401, 403]:
+            return "🔴 BANNED / EXPIRED"
+        elif e.code == 429:
+            return "⚠️ RATE LIMITED"
+        elif e.code == 400:
+            return "🟢 WORKING"
+        else:
+            return f"⚠️ HTTP {e.code}"
+    except Exception:
+        return "⚠️ UNREACHABLE"
 
 def get_account_fingerprint(email, token):
     seed = f"freebuff_unique_account_{email}_{token}"
@@ -172,6 +203,33 @@ def discover_all_accounts():
     save_json(SHARED_ACCOUNTS_FILE, acc_list)
     return acc_list
 
+def test_all_accounts():
+    accs = discover_all_accounts()
+    print("=" * 80)
+    print(" 🔎 TESTING ALL FREEBUFF ACCOUNT SLOTS FOR HEALTH & BANS 🔎")
+    print("=" * 80)
+    print("Testing token validity against Freebuff API...\n")
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_acc = {executor.submit(check_token_status, acc["token"]): acc for acc in accs}
+        for future in concurrent.futures.as_completed(future_to_acc):
+            acc = future_to_acc[future]
+            try:
+                status = future.result()
+            except Exception:
+                status = "⚠️ ERROR"
+            results.append((acc, status))
+
+    results.sort(key=lambda x: accs.index(x[0]))
+
+    print(f" {'#':<3} | {'Account Name':<16} | {'Email':<30} | Health Status")
+    print("-" * 80)
+    for i, (acc, status) in enumerate(results, 1):
+        print(f" {i:<3} | {acc['name']:<16} | {acc['email']:<30} | {status}")
+    print("-" * 80)
+    print("Legend: 🟢 WORKING | 🔴 BANNED / EXPIRED | ⚠️ RATE LIMITED | ⚪ UNSET\n")
+
 def delete_account_slot(target_arg=None):
     accs = discover_all_accounts()
     if not accs:
@@ -228,13 +286,11 @@ def delete_account_slot(target_arg=None):
 
     print(f"🗑️ Deleting Account/Slot: {target_acc['name']} ({target_acc['email']})...")
 
-    # 1. Remove from SHARED_ACCOUNTS_FILE
     shared = load_json(SHARED_ACCOUNTS_FILE)
     if isinstance(shared, list):
         shared = [a for a in shared if a.get("email", "").lower() != email_to_remove and a.get("token") != token_to_remove]
         save_json(SHARED_ACCOUNTS_FILE, shared)
 
-    # 2. Remove instance folder if it matches slot number
     for target_dir in [HOME_INSTANCES_DIR, INSTANCES_DIR]:
         if str(target_arg).isdigit():
             slot_num = int(target_arg)
@@ -370,6 +426,7 @@ def print_unified_menu(accounts, dt_token, cli_token):
     print("-" * 80)
     print("Commands:")
     print("  • Enter account number (e.g. '1') to choose target app to activate")
+    print("  • './switch test' or 'check' to test all slots for bans & rate limits")
     print("  • './switch login <slot>' to launch interactive CLI login for a slot")
     print("  • './switch delete' or 'rm' to interactively choose & delete a slot")
     print("  • './switch add <token> <email> [name]' to register a brand new account token")
@@ -383,6 +440,10 @@ def main():
     args = sys.argv[1:]
     if args:
         first = args[0].lower()
+
+        if first in ["test", "check", "verify", "health"]:
+            test_all_accounts()
+            return
 
         if first in ["delete", "rm", "remove"]:
             target = args[1] if len(args) >= 2 else None
@@ -436,6 +497,10 @@ def main():
         choice = input("Select account number (1-N) or command: ").strip()
         if not choice or choice.lower() == 'q':
             print("Exiting.")
+            return
+
+        if choice.lower() in ["test", "check", "verify", "health"]:
+            test_all_accounts()
             return
 
         parts = choice.split()
