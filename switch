@@ -3,12 +3,13 @@
 ⚡ UNIFIED FREEBUFF ACCOUNT SWITCHER (CLI & DESKTOP) ⚡
 Dynamically auto-discovers accounts from Desktop, CLI instances, parent configs, and credentials.
 Allows switching Desktop, CLI, or Both with single commands.
-Assigns unique device fingerprints per account.
+Supports ./switch delete <slot> to remove accounts.
 """
 
 import os
 import sys
 import json
+import shutil
 import subprocess
 import hashlib
 from pathlib import Path
@@ -85,7 +86,6 @@ FALLBACK_ACCOUNTS = [
 ]
 
 def get_account_fingerprint(email, token):
-    """Generates a unique, deterministic device fingerprint per account."""
     seed = f"freebuff_unique_account_{email}_{token}"
     fp_hash = hashlib.sha256(seed.encode()).hexdigest()
     fp_id = "enhanced-" + hashlib.sha256((seed + "_id").encode()).hexdigest()[:43]
@@ -106,7 +106,6 @@ def save_json(filepath, data):
         json.dump(data, f, indent=2)
 
 def discover_all_accounts():
-    # Slots 1..8 map directly to fallback/CLI instance slots
     slot_accounts = {}
     for i, acc in enumerate(FALLBACK_ACCOUNTS, 1):
         slot_accounts[i] = {
@@ -118,7 +117,6 @@ def discover_all_accounts():
             "slot": i
         }
 
-    # Check CLI instance slots 1..8 to OVERWRITE slot accounts if logged in
     for slot in range(1, 9):
         for target_dir in [HOME_INSTANCES_DIR, INSTANCES_DIR]:
             cred = load_json(target_dir / f"instance{slot}" / "home/.config/manicode/credentials.json")
@@ -135,7 +133,6 @@ def discover_all_accounts():
                         }
 
     accounts_by_key = {}
-    # First add mapped slot accounts 1..8
     for slot in range(1, 9):
         acc = slot_accounts[slot]
         accounts_by_key[acc["email"].lower()] = acc
@@ -174,6 +171,54 @@ def discover_all_accounts():
     acc_list = list(accounts_by_key.values())
     save_json(SHARED_ACCOUNTS_FILE, acc_list)
     return acc_list
+
+def delete_account_slot(target_arg):
+    accs = discover_all_accounts()
+    target_acc = None
+    
+    if str(target_arg).isdigit():
+        idx = int(target_arg) - 1
+        if 0 <= idx < len(accs):
+            target_acc = accs[idx]
+
+    if not target_acc:
+        for acc in accs:
+            if acc["name"].lower() == str(target_arg).lower() or acc["email"].lower() == str(target_arg).lower():
+                target_acc = acc
+                break
+
+    if not target_acc:
+        print(f"❌ Account/Slot '{target_arg}' not found.")
+        return
+
+    email_to_remove = target_acc["email"].lower()
+    token_to_remove = target_acc["token"]
+
+    print(f"🗑️ Deleting Account/Slot: {target_acc['name']} ({target_acc['email']})...")
+
+    # 1. Remove from SHARED_ACCOUNTS_FILE
+    shared = load_json(SHARED_ACCOUNTS_FILE)
+    if isinstance(shared, list):
+        shared = [a for a in shared if a.get("email", "").lower() != email_to_remove and a.get("token") != token_to_remove]
+        save_json(SHARED_ACCOUNTS_FILE, shared)
+
+    # 2. Remove instance folder if it matches slot number
+    for target_dir in [HOME_INSTANCES_DIR, INSTANCES_DIR]:
+        if str(target_arg).isdigit():
+            slot_num = int(target_arg)
+            inst_dir = target_dir / f"instance{slot_num}"
+            if inst_dir.exists():
+                shutil.rmtree(inst_dir, ignore_errors=True)
+
+        for slot_dir in target_dir.glob("instance*"):
+            cred_file = slot_dir / "home/.config/manicode/credentials.json"
+            cred = load_json(cred_file)
+            if cred:
+                for v in cred.values():
+                    if isinstance(v, dict) and (v.get("email", "").lower() == email_to_remove or v.get("authToken") == token_to_remove):
+                        shutil.rmtree(slot_dir, ignore_errors=True)
+
+    print(f"✅ Successfully deleted account slot '{target_arg}' ({target_acc['email']})!")
 
 def get_active_desktop_token():
     state = load_json(DESKTOP_STATE_PATH)
@@ -266,7 +311,6 @@ def launch_cli_slot_login(slot, label=None):
         print(f"🔑 Launching Freebuff Login for Slot {slot}...")
         subprocess.run(f"npx freebuff login", shell=True)
 
-    # Post-login: Refresh discovered accounts & activate slot directly
     accs = discover_all_accounts()
     if 0 < slot <= len(accs):
         target_acc = accs[slot - 1]
@@ -296,6 +340,7 @@ def print_unified_menu(accounts, dt_token, cli_token):
     print("Commands:")
     print("  • Enter account number (e.g. '1') to choose target app to activate")
     print("  • './switch login <slot>' to launch interactive CLI login for a slot")
+    print("  • './switch delete <slot>' or 'rm <slot>' to delete an account slot")
     print("  • './switch add <token> <email> [name]' to register a brand new account token")
     print("  • 'q' to exit\n")
 
@@ -307,6 +352,13 @@ def main():
     args = sys.argv[1:]
     if args:
         first = args[0].lower()
+
+        if first in ["delete", "rm", "remove"]:
+            if len(args) >= 2:
+                delete_account_slot(args[1])
+            else:
+                print("Usage: ./switch delete <slot_number_or_name>")
+            return
 
         if first in ["add", "login"]:
             if len(args) >= 3 and len(args[1]) > 10:
@@ -358,6 +410,10 @@ def main():
             return
 
         parts = choice.split()
+        if parts[0].lower() in ["delete", "rm", "remove"] and len(parts) >= 2:
+            delete_account_slot(parts[1])
+            return
+
         if parts[0].lower() in ["add", "login"] and len(parts) >= 2 and parts[1].isdigit():
             launch_cli_slot_login(int(parts[1]))
             return
