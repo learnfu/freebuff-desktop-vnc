@@ -477,10 +477,40 @@ def print_unified_menu(accounts, dt_token, cli_token):
     print("Commands:")
     print("  • Enter account number (e.g. '1') to choose target app to activate")
     print("  • './switch streak' to view daily streak days & usage for all accounts")
+    print("  • './switch auto-streak' to automatically boost daily streaks for all inactive accounts")
     print("  • './switch test' or 'check' to test all slots for bans & rate limits")
     print("  • './switch delete' or 'rm' to interactively choose & delete a slot")
     print("  • './switch add <token> <email> [name]' to register a brand new account token")
+    print("  • './switch --help' or '-h' for full CLI help & usage reference")
     print("  • 'q' to exit\n")
+
+def print_help():
+    print("=" * 80)
+    print(" ⚡ UNIFIED FREEBUFF ACCOUNT SWITCHER CLI (HELP & USAGE) ⚡")
+    print("=" * 80)
+    print("Usage: ./switch [command|slot_number|email|name] [target_app]\n")
+    print("Direct Switching Commands:")
+    print("  ./switch <N>                       Switch Desktop GUI & CLI to account slot #N")
+    print("  ./switch <N> desktop | d           Switch Desktop GUI only to account slot #N")
+    print("  ./switch <N> cli | c               Switch CLI only to account slot #N")
+    print("  ./switch <email|name>              Switch to account matching email or name\n")
+    print("Account Management Commands:")
+    print("  ./switch streak | fire             View daily streak days & usage status for all accounts")
+    print("  ./switch auto-streak | boost       Automatically boost daily streaks for inactive accounts")
+    print("  ./switch test | check              Test all account slots for health, rate limits & bans")
+    print("  ./switch list | ls                 List all discovered accounts and active status (non-interactive)")
+    print("  ./switch add <token> <email> [name] Register a brand new account token into shared storage")
+    print("  ./switch add <slot_number>         Launch CLI login instance harness for target slot")
+    print("  ./switch delete | rm [N|email]     Delete/unlink target account slot or interactively choose")
+    print("  ./switch --help | -h | help        Display this CLI help and usage reference\n")
+    print("Examples:")
+    print("  ./switch 1                         # Activate slot 1 for both Desktop & CLI")
+    print("  ./switch 2 desktop                 # Activate slot 2 for Desktop GUI only")
+    print("  ./switch streak                    # Check daily streaks across all accounts")
+    print("  ./switch auto-streak               # Automatically boost streaks for inactive accounts")
+    print("  ./switch add 3                     # Log in to slot 3 instance via CLI")
+    print("  ./switch add <token> <email>       # Register new token directly")
+    print("=" * 80 + "\n")
 
 def main():
     accounts = discover_all_accounts()
@@ -490,6 +520,22 @@ def main():
     args = sys.argv[1:]
     if args:
         first = args[0].lower()
+
+        if first in ["--help", "-h", "help"]:
+            print_help()
+            return
+
+        if first in ["list", "ls"]:
+            print_unified_menu(accounts, dt_token, cli_token)
+            return
+
+        if first in ["auto-streak", "autostreak", "boost"]:
+            auto_streak_path = BUFFDESKTOP_DIR / "auto_streak.py"
+            if auto_streak_path.exists():
+                subprocess.run([sys.executable, str(auto_streak_path)])
+            else:
+                print("auto_streak.py not found.")
+            return
 
         if first in ["streak", "streaks", "fire"]:
             check_streaks_all_accounts()
@@ -551,6 +597,22 @@ def main():
         choice = input("Select account number (1-N) or command: ").strip()
         if not choice or choice.lower() == 'q':
             print("Exiting.")
+            return
+
+        if choice.lower() in ["--help", "-h", "help"]:
+            print_help()
+            return
+
+        if choice.lower() in ["list", "ls"]:
+            print_unified_menu(accounts, dt_token, cli_token)
+            return
+
+        if choice.lower() in ["auto-streak", "autostreak", "boost"]:
+            auto_streak_path = BUFFDESKTOP_DIR / "auto_streak.py"
+            if auto_streak_path.exists():
+                subprocess.run([sys.executable, str(auto_streak_path)])
+            else:
+                print("auto_streak.py not found.")
             return
 
         if choice.lower() in ["streak", "streaks", "fire"]:
