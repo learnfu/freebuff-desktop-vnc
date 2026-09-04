@@ -22,6 +22,17 @@ HOME_INSTANCES_DIR = Path(os.path.expanduser("~/.freebuff-cli-instances"))
 INSTANCES_DIR = Path(os.path.expanduser("~/myworks/freebuffallacc/freebuff-cli-instances"))
 FREEBUFF2API_BIN = Path(os.path.expanduser("~/myworks/freebuffallacc/freebuff2api"))
 
+FALLBACK_ACCOUNTS = [
+    {"name": "gwgdev+hey", "email": "gwgdev+hey@proton.me", "token": "55dd5d3b-c66c-4b50-8f54-a9cace677b50"},
+    {"name": "jkiloals", "email": "gwgdev@proton.me", "token": "b270349f-1358-4a89-9898-c9149389908e"},
+    {"name": "koalsw", "email": "holapws@proton.me", "token": "6d3f5afa-cfa1-4eaf-8ea7-ed8b9478db96"},
+    {"name": "kisolaps", "email": "holapws+hey@proton.me", "token": "c7f61f4d-7f14-4361-82f3-f458b4867b79"},
+    {"name": "lpalsa", "email": "lookatcock+hoo@proton.me", "token": "51facf0a-7402-4431-b0f2-08823c3a48e0"},
+    {"name": "hirautagao", "email": "hirautagao@gmail.com", "token": "df9fae88-ae23-4581-80fc-efd0b6caebff"},
+    {"name": "loopcss", "email": "loopcpp+wo@proton.me", "token": "7789cd96-c2a5-4a7f-9913-6575f99cdde0"},
+    {"name": "jiksol", "email": "lookatcock@proton.me", "token": "fb8e91ad-09de-4a95-a637-e9bc984b5ba6"}
+]
+
 def load_json(p):
     if os.path.exists(p):
         try:
@@ -39,6 +50,12 @@ def load_deleted():
 def discover_accounts():
     deleted = load_deleted()
     accs_by_email = {}
+
+    for a in FALLBACK_ACCOUNTS:
+        email = a.get("email", "").lower()
+        tok = a.get("token")
+        if email and tok and email not in deleted and tok.lower() not in deleted:
+            accs_by_email[email] = a
 
     shared = load_json(SHARED_ACCOUNTS_FILE)
     if isinstance(shared, list):
@@ -72,6 +89,10 @@ def get_streak_info(token):
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code in [401, 403]:
+            return {"streak": 0, "todayUsed": False, "status": "🔴 Banned/Expired Token"}
+        return None
     except Exception:
         return None
 
@@ -81,8 +102,8 @@ def boost_account_streak(acc, proxy_port):
     name = acc.get("name")
 
     streak_info = get_streak_info(token)
-    if not streak_info:
-        return {"name": name, "email": email, "status": "❌ Invalid/Banned Token", "streak": 0, "todayUsed": False}
+    if not streak_info or streak_info.get("status") == "🔴 Banned/Expired Token":
+        return {"name": name, "email": email, "status": "🔴 Banned/Expired Token", "streak": 0, "todayUsed": False}
 
     if streak_info.get("todayUsed"):
         return {
@@ -94,7 +115,6 @@ def boost_account_streak(acc, proxy_port):
             "lastUsageDate": streak_info.get("lastUsageDate")
         }
 
-    # Route a turn through freebuff2api proxy for this specific account
     payload = json.dumps({
         "model": "mimo/mimo-v2.5",
         "messages": [{"role": "user", "content": "hi"}]
@@ -143,18 +163,28 @@ def run_auto_streak():
     print("=" * 95)
     print(f"Checking & boosting daily streaks for {len(accounts)} accounts...\n")
 
-    # Start local freebuff2api engine for multi-account routing
     proxy_port = 8998
+    proxy_accounts = []
+    seen_keys = set()
+
+    for a in accounts:
+        tok = a.get("token")
+        email = a.get("email", "").strip()
+        name = a.get("name", "").strip()
+        if tok:
+            if email and email.lower() not in seen_keys:
+                proxy_accounts.append({"name": email, "token": tok, "enabled": True})
+                proxy_accounts.append({"name": email.lower(), "token": tok, "enabled": True})
+                seen_keys.add(email.lower())
+            if name and name.lower() not in seen_keys:
+                proxy_accounts.append({"name": name, "token": tok, "enabled": True})
+                proxy_accounts.append({"name": name.lower(), "token": tok, "enabled": True})
+                seen_keys.add(name.lower())
+
     cfg_data = {
         "listen_addr": f"127.0.0.1:{proxy_port}",
         "upstream_base_url": "https://www.codebuff.com",
-        "accounts": [
-            {
-                "name": a.get("email"),
-                "token": a.get("token"),
-                "enabled": True
-            } for a in accounts
-        ]
+        "accounts": proxy_accounts
     }
     cfg_path = "/tmp/auto_streak_proxy_cfg.json"
     json.dump(cfg_data, open(cfg_path, "w"), indent=2)
