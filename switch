@@ -438,21 +438,60 @@ def add_new_account(token, email, name=None):
 
 def launch_cli_slot_login(slot, label=None):
     slot_label = label or f"freebuff-cli-slot-{slot}"
+    target_dir = HOME_INSTANCES_DIR / f"instance{slot}"
+    home_dir = target_dir / "home"
+    os.makedirs(home_dir, exist_ok=True)
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["MANICODE_CONFIG_DIR"] = str(home_dir / ".config" / "manicode")
+
     sh_path = FREEBUFF_ALLACC_DIR / "freebuff-cli-instances.sh"
     if sh_path.exists():
         print(f"🔑 Launching Official Freebuff CLI Login for Slot {slot} [{slot_label}]...")
         subprocess.run(f"bash '{sh_path}' login {slot} '{slot_label}'", shell=True, cwd=FREEBUFF_ALLACC_DIR)
     else:
-        print(f"🔑 Launching Freebuff Login for Slot {slot}...")
-        subprocess.run(f"npx freebuff login", shell=True)
+        print(f"🔑 Launching Freebuff Login for Slot {slot} [{slot_label}]...")
+        subprocess.run("npx freebuff login", shell=True, env=env, cwd=str(home_dir))
 
-    accs = discover_all_accounts()
-    if 0 < slot <= len(accs):
-        target_acc = accs[slot - 1]
-        remove_deleted_account(target_acc["email"])
-        remove_deleted_account(target_acc["token"])
-        set_cli_account(target_acc)
-        print(f"🎉 Slot {slot} successfully updated & activated: {target_acc['name']} ({target_acc['email']})!")
+    cred_file = home_dir / ".config" / "manicode" / "credentials.json"
+    if not cred_file.exists():
+        root_cred = Path(os.path.expanduser("~/.config/manicode/credentials.json"))
+        if root_cred.exists():
+            cred_file = root_cred
+
+    cred = load_json(cred_file)
+    if cred:
+        for v in cred.values():
+            if isinstance(v, dict) and v.get("authToken") and v.get("email"):
+                tok = v["authToken"]
+                email = v["email"]
+                name = v.get("name") or email.split("@")[0]
+                remove_deleted_account(email)
+                remove_deleted_account(tok)
+
+                inst_cred_file = home_dir / ".config" / "manicode" / "credentials.json"
+                save_json(inst_cred_file, {
+                    "default": {
+                        "id": v.get("id") or f"usr_slot_{slot}",
+                        "name": name,
+                        "email": email,
+                        "authToken": tok
+                    }
+                })
+
+                add_new_account(tok, email, name)
+                acc = {
+                    "name": name,
+                    "email": email,
+                    "token": tok,
+                    "id": v.get("id") or f"usr_slot_{slot}",
+                    "display_name": name,
+                    "slot": slot
+                }
+                set_desktop_account(acc)
+                set_cli_account(acc)
+                print(f"🎉 Slot {slot} successfully logged in & activated: {name} ({email})!")
 
 def print_unified_menu(accounts, dt_token, cli_token):
     print("=" * 80)
@@ -562,8 +601,9 @@ def main():
                 label = args[2] if len(args) >= 3 else None
                 launch_cli_slot_login(slot, label)
                 return
-            elif len(args) == 1:
-                launch_cli_slot_login(1)
+            else:
+                next_slot = len(accounts) + 1
+                launch_cli_slot_login(next_slot)
                 return
 
         selected = None
@@ -629,13 +669,17 @@ def main():
             delete_account_slot(target)
             return
 
-        if parts[0].lower() in ["add", "login"] and len(parts) >= 2 and parts[1].isdigit():
-            launch_cli_slot_login(int(parts[1]))
-            return
-
-        if parts[0].lower() in ["add", "login"] and len(parts) >= 3:
-            add_new_account(parts[1], parts[2], parts[3] if len(parts) >= 4 else None)
-            return
+        if parts[0].lower() in ["add", "login"]:
+            if len(parts) >= 3 and len(parts[1]) > 10:
+                add_new_account(parts[1], parts[2], parts[3] if len(parts) >= 4 else None)
+                return
+            elif len(parts) >= 2 and parts[1].isdigit():
+                launch_cli_slot_login(int(parts[1]))
+                return
+            else:
+                next_slot = len(accounts) + 1
+                launch_cli_slot_login(next_slot)
+                return
 
         selected = None
         if parts[0].isdigit():
