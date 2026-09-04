@@ -3,3 +3,5 @@ squashfs-root/
 *.log
 login_url.txt
 __pycache__/
+*.AppImage
+*.bak
