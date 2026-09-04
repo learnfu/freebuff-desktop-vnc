@@ -30,64 +30,7 @@ HOME_INSTANCES_DIR = Path(os.path.expanduser("~/.freebuff-cli-instances"))
 
 BUFFDESKTOP_DIR = Path(os.path.expanduser("~/myworks/buffdesktop"))
 
-FALLBACK_ACCOUNTS = [
-    {
-        "name": "gwgdev+hey",
-        "email": "gwgdev+hey@proton.me",
-        "token": "55dd5d3b-c66c-4b50-8f54-a9cace677b50",
-        "id": "08141fc2-810b-4960-bd11-d566010e01ab",
-        "display_name": "ksopls"
-    },
-    {
-        "name": "jkiloals",
-        "email": "gwgdev@proton.me",
-        "token": "b270349f-1358-4a89-9898-c9149389908e",
-        "id": "e7f66312-3f69-41a8-bb40-42c5f9747921",
-        "display_name": "jkiloals"
-    },
-    {
-        "name": "koalsw",
-        "email": "holapws@proton.me",
-        "token": "6d3f5afa-cfa1-4eaf-8ea7-ed8b9478db96",
-        "id": "626ddad4-0012-42ae-99d0-f6f8d1bb365c",
-        "display_name": "koalsw"
-    },
-    {
-        "name": "kisolaps",
-        "email": "holapws+hey@proton.me",
-        "token": "c7f61f4d-7f14-4361-82f3-f458b4867b79",
-        "id": "b0836c8c-d294-4972-aff7-87914f22ab86",
-        "display_name": "kisolaps"
-    },
-    {
-        "name": "lpalsa",
-        "email": "lookatcock+hoo@proton.me",
-        "token": "51facf0a-7402-4431-b0f2-08823c3a48e0",
-        "id": "246ff27d-8041-4431-b505-8cd15583e5f6",
-        "display_name": "lpalsa"
-    },
-    {
-        "name": "hirautagao",
-        "email": "hirautagao@gmail.com",
-        "token": "df9fae88-ae23-4581-80fc-efd0b6caebff",
-        "id": "usr_slot_6",
-        "display_name": "hirautagao"
-    },
-    {
-        "name": "loopcss",
-        "email": "loopcpp+wo@proton.me",
-        "token": "7789cd96-c2a5-4a7f-9913-6575f99cdde0",
-        "id": "97a877c5-fd9f-4838-a597-575229c39d82",
-        "display_name": "loopcss"
-    },
-    {
-        "name": "jiksol",
-        "email": "lookatcock@proton.me",
-        "token": "fb8e91ad-09de-4a95-a637-e9bc984b5ba6",
-        "id": "91163d31-c53d-4063-baf2-a3407664d462",
-        "display_name": "jiksol"
-    }
-]
+FALLBACK_ACCOUNTS = []
 
 def load_json(filepath):
     if not os.path.exists(filepath):
@@ -178,6 +121,16 @@ def discover_all_accounts():
     deleted = load_deleted_accounts()
 
     slot_accounts = {}
+    for slot in range(1, 9):
+        slot_accounts[slot] = {
+            "name": f"freebuff-cli-slot-{slot}",
+            "email": "not logged in",
+            "token": "",
+            "id": f"usr_slot_{slot}",
+            "display_name": f"slot-{slot}",
+            "slot": slot
+        }
+
     for i, acc in enumerate(FALLBACK_ACCOUNTS, 1):
         if acc["email"].lower() in deleted or acc["token"].lower() in deleted:
             slot_accounts[i] = {
