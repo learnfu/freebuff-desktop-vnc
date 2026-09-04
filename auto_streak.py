@@ -2,8 +2,8 @@
 """
 🔥 FREEBUFF AUTOMATED DAILY STREAK BOOSTER (`auto_streak.py`) 🔥
 Scans all configured accounts, checks their daily streak status, and automatically
-routes a lightweight session turn through the local Freebuff proxy harness for any account
-that hasn't registered usage today to boost its streak to 1+ immediately!
+routes a lightweight session turn through local proxy or direct Codebuff agent-run harness
+for any account that hasn't registered usage today to boost its streak to 1+ immediately!
 """
 
 import os
@@ -23,6 +23,7 @@ DESKTOP_STATE_PATH = os.path.expanduser("~/.config/freebuff-desktop/state.json")
 CLI_CRED_PATH = os.path.expanduser("~/.config/manicode/credentials.json")
 
 FREEBUFF_ALLACC_DIR = Path(os.path.expanduser("~/myworks/freebuffallacc"))
+BUFFDESKTOP_DIR = Path(os.path.expanduser("~/myworks/buffdesktop"))
 INSTANCES_DIR = FREEBUFF_ALLACC_DIR / "freebuff-cli-instances"
 HOME_INSTANCES_DIR = Path(os.path.expanduser("~/.freebuff-cli-instances"))
 FREEBUFF2API_BIN = FREEBUFF_ALLACC_DIR / "freebuff2api"
@@ -168,25 +169,29 @@ def boost_account_streak(acc, proxy_port):
             "lastUsageDate": streak_info.get("lastUsageDate")
         }
 
-    payload = json.dumps({
-        "model": "mimo/mimo-v2.5",
-        "messages": [{"role": "user", "content": "hi"}]
-    }).encode()
+    last_error = None
 
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{proxy_port}/v1/chat/completions",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "X-Freebuff-Account": email
-        }
-    )
-
+    # Tier 1: Local Proxy Turn
     try:
+        payload = json.dumps({
+            "model": "mimo/mimo-v2.5",
+            "messages": [{"role": "user", "content": "hi"}]
+        }).encode()
+
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{proxy_port}/v1/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Freebuff-Account": email
+            }
+        )
         with urllib.request.urlopen(req, timeout=20) as resp:
             resp.read()
-    except Exception:
-        pass
+    except urllib.error.HTTPError as e:
+        last_error = f"Proxy HTTP {e.code}"
+    except Exception as e:
+        last_error = str(e)
 
     time.sleep(2)
     updated_streak = get_streak_info(token)
@@ -199,14 +204,67 @@ def boost_account_streak(acc, proxy_port):
             "todayUsed": True,
             "lastUsageDate": updated_streak.get("lastUsageDate")
         }
-    else:
+
+    # Tier 2: Direct Agent-Run Fallback
+    try:
+        start_req = urllib.request.Request(
+            "https://www.codebuff.com/api/v1/agent-runs",
+            data=json.dumps({"action": "START", "agentId": "mimo/mimo-v2.5"}).encode(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0"
+            }
+        )
+        run_id = None
+        with urllib.request.urlopen(start_req, timeout=10) as s_resp:
+            s_data = json.loads(s_resp.read().decode())
+            run_id = s_data.get("runId")
+
+        if run_id:
+            finish_req = urllib.request.Request(
+                "https://www.codebuff.com/api/v1/agent-runs",
+                data=json.dumps({
+                    "action": "FINISH",
+                    "runId": run_id,
+                    "status": "completed",
+                    "totalSteps": 1,
+                    "directCredits": 0,
+                    "totalCredits": 0
+                }).encode(),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0"
+                }
+            )
+            with urllib.request.urlopen(finish_req, timeout=10) as f_resp:
+                f_resp.read()
+    except urllib.error.HTTPError as e:
+        last_error = f"Direct AgentRun HTTP {e.code}"
+    except Exception as e:
+        last_error = str(e)
+
+    time.sleep(2)
+    final_streak = get_streak_info(token)
+    if final_streak and final_streak.get("todayUsed"):
         return {
             "name": name,
             "email": email,
-            "status": "⚡ Session Turn Sent",
-            "streak": updated_streak.get("streak", 0) if updated_streak else 0,
-            "todayUsed": updated_streak.get("todayUsed", False) if updated_streak else False,
-            "lastUsageDate": updated_streak.get("lastUsageDate", "N/A") if updated_streak else "N/A"
+            "status": f"🚀 Streak Boosted to {final_streak.get('streak', 0)}d!",
+            "streak": final_streak.get("streak", 0),
+            "todayUsed": True,
+            "lastUsageDate": final_streak.get("lastUsageDate")
+        }
+    else:
+        err_msg = f"❌ Failed ({last_error})" if last_error else "⚡ Turn Sent (Streak Pending Midnight Reset)"
+        return {
+            "name": name,
+            "email": email,
+            "status": err_msg,
+            "streak": final_streak.get("streak", 0) if final_streak else 0,
+            "todayUsed": final_streak.get("todayUsed", False) if final_streak else False,
+            "lastUsageDate": final_streak.get("lastUsageDate", "N/A") if final_streak else "N/A"
         }
 
 def run_auto_streak():
@@ -214,6 +272,12 @@ def run_auto_streak():
     print("=" * 95)
     print(" 🔥 AUTOMATED FREEBUFF DAILY STREAK BOOSTER 🔥")
     print("=" * 95)
+
+    if not accounts:
+        print("No active accounts found.")
+        print("Log in or add an account using ./switch add <token> <email>.\n")
+        return
+
     print(f"Checking & boosting daily streaks for {len(accounts)} accounts...\n")
 
     proxy_port = 8998
