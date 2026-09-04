@@ -50,13 +50,6 @@ FALLBACK_ACCOUNTS = [
         "display_name": "koalsw"
     },
     {
-        "name": "iolpsa",
-        "email": "huisjal+3@proton.me",
-        "token": "e8fbecc5-839b-4443-97d2-30a8538707c9",
-        "id": "5af03bd7-9453-4aee-877d-f7630cb7bdc9",
-        "display_name": "iolpsa"
-    },
-    {
         "name": "kisolaps",
         "email": "holapws+hey@proton.me",
         "token": "c7f61f4d-7f14-4361-82f3-f458b4867b79",
@@ -110,18 +103,24 @@ def load_deleted():
 
 def discover_accounts():
     deleted = load_deleted()
-    accounts_by_key = {}
-
+    slot_accounts = {}
     for i, acc in enumerate(FALLBACK_ACCOUNTS, 1):
-        email_lc = acc["email"].lower()
-        tok_lc = acc["token"].lower()
-        if email_lc not in deleted and tok_lc not in deleted:
-            accounts_by_key[email_lc] = {
-                "name": acc.get("name") or acc["email"].split("@")[0],
+        if acc["email"].lower() in deleted or acc["token"].lower() in deleted:
+            slot_accounts[i] = {
+                "name": f"freebuff-cli-slot-{i}",
+                "email": "not logged in",
+                "token": "",
+                "id": f"usr_slot_{i}",
+                "display_name": f"slot-{i}",
+                "slot": i
+            }
+        else:
+            slot_accounts[i] = {
+                "name": acc["name"],
                 "email": acc["email"],
                 "token": acc["token"],
-                "id": acc.get("id") or f"usr_slot_{i}",
-                "display_name": acc.get("display_name") or acc.get("name") or acc["email"].split("@")[0],
+                "id": acc["id"],
+                "display_name": acc["display_name"],
                 "slot": i
             }
 
@@ -134,7 +133,7 @@ def discover_accounts():
                         email_lc = v["email"].lower()
                         tok_lc = v["authToken"].lower()
                         if email_lc not in deleted and tok_lc not in deleted:
-                            accounts_by_key[email_lc] = {
+                            slot_accounts[slot] = {
                                 "name": v.get("name") or v["email"].split("@")[0],
                                 "email": v["email"],
                                 "token": v["authToken"],
@@ -142,6 +141,12 @@ def discover_accounts():
                                 "display_name": v.get("name") or v["email"].split("@")[0],
                                 "slot": slot
                             }
+
+    accounts_by_key = {}
+    for slot in range(1, 9):
+        acc = slot_accounts[slot]
+        if acc["email"] != "not logged in":
+            accounts_by_key[acc["email"].lower()] = acc
 
     def add_extra_acc(token, email, name=None, user_id=None):
         if not token or not isinstance(token, str) or len(token) < 10:
@@ -176,7 +181,7 @@ def discover_accounts():
             if isinstance(v, dict) and v.get("authToken"):
                 add_extra_acc(v.get("authToken"), v.get("email"), v.get("name"), v.get("id"))
 
-    return list(accounts_by_key.values())
+    return [a for a in accounts_by_key.values() if a["email"].lower() not in deleted and a["token"].lower() not in deleted]
 
 def get_streak_info(token):
     url = "https://www.codebuff.com/api/v1/freebuff/streak"
